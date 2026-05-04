@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Auto-Translate Sidecar — Console</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                  Roboto, sans-serif;
+    margin: 0; padding: 24px;
+    background: #f5f7fa; color: #222;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+  }
+  header h1 { margin: 0; font-size: 22px; }
+  header .health {
+    margin-left: auto; padding: 4px 12px; border-radius: 12px;
+    font-size: 12px; font-weight: bold;
+  }
+  .health.up   { background: #d1f7d6; color: #117a30; }
+  .health.down { background: #fde2e2; color: #b71f1f; }
+  .health.loading { background: #e6e9ef; color: #555; }
+
+  .auth-row {
+    background: #fff7e6; border: 1px solid #ffd591;
+    padding: 8px 12px; border-radius: 6px; font-size: 13px;
+    margin-bottom: 16px; display: flex; gap: 8px; align-items: center;
+  }
+  .auth-row input { padding: 4px 8px; font-family: monospace; }
+  .auth-row button {
+    padding: 4px 12px; cursor: pointer;
+    background: #1976d2; color: #fff; border: none; border-radius: 4px;
+  }
+
+  main { display: grid;
+    grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+
+  .card {
+    background: #fff; border: 1px solid #e0e4ea;
+    border-radius: 8px; padding: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card h2 {
+    margin: 0 0 12px 0; font-size: 16px;
+    color: #1976d2; border-bottom: 1px solid #e0e4ea;
+    padding-bottom: 8px;
+  }
+  .card .subtitle {
+    font-size: 12px; color: #666; margin-bottom: 8px;
+  }
+  .full-width { grid-column: 1 / -1; }
+
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  th, td {
+    text-align: left; padding: 6px 8px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  th { background: #fafafa; font-weight: 600; color: #555; }
+  td.mono { font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
+
+  .lang-pill {
+    display: inline-block; padding: 2px 10px; margin: 2px;
+    background: #e3f2fd; color: #1565c0;
+    border-radius: 12px; font-size: 12px; font-weight: 600;
+  }
+  .stat {
+    display: inline-block; margin-right: 24px;
+    border-right: 1px solid #e0e4ea; padding-right: 24px;
+  }
+  .stat:last-child { border: none; }
+  .stat .label { font-size: 12px; color: #888; }
+  .stat .value { font-size: 24px; font-weight: 600; color: #222; }
+
+  textarea, select, input.txt {
+    width: 100%; padding: 6px 8px; border: 1px solid #cfd6dd;
+    border-radius: 4px; font-family: inherit; font-size: 13px;
+  }
+  textarea { font-family: "SF Mono", Consolas, monospace; }
+  button.primary {
+    background: #1976d2; color: #fff; border: none; padding: 6px 14px;
+    border-radius: 4px; cursor: pointer; font-size: 13px;
+    margin-top: 8px;
+  }
+  button.primary:hover { background: #1565c0; }
+  button.primary:disabled { background: #aaa; cursor: not-allowed; }
+  pre.result {
+    background: #fafafa; padding: 8px; font-size: 12px;
+    border-radius: 4px; overflow: auto; max-height: 240px;
+    border: 1px solid #e0e4ea;
+    font-family: "SF Mono", Consolas, monospace;
+  }
+  .err {
+    background: #fde2e2; color: #b71f1f; padding: 8px;
+    border-radius: 4px; font-size: 13px;
+  }
+  .col-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row label { font-size: 12px; color: #666; min-width: 90px; }
+
+  .footer {
+    margin-top: 24px; text-align: center; font-size: 12px; color: #888;
+  }
+  .footer a { color: #1976d2; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🌐 Auto-Translate Sidecar — Console</h1>
+  <span id="healthBadge" class="health loading">⏳ checking…</span>
+</header>
+
+<div class="auth-row">
+  <strong>HTTP Basic auth:</strong>
+  <span>user:</span>
+  <input id="authUser" value="admin" size="8">
+  <span>pwd:</span>
+  <input id="authPass" type="password" value="admin-pwd-change-me" size="22">
+  <button onclick="reloadAll()">🔄 Reload</button>
+  <span style="color:#888;font-size:12px;margin-left:auto;">
+    Demo: admin / admin-pwd-change-me &nbsp;|&nbsp; maximo / maximo-pwd-change-me
+  </span>
+</div>
+
+<main>
+
+<!-- =============================================================== -->
+<!-- 1. SERVICE HEALTH + STATS                                       -->
+<!-- =============================================================== -->
+<section class="card">
+  <h2>📊 Service stats</h2>
+  <div class="subtitle">Catalog summary &amp; runtime health.</div>
+  <div id="statsBox">
+    <div class="stat">
+      <div class="label">Unique records</div>
+      <div class="value" id="statRecords">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Translations stored</div>
+      <div class="value" id="statTotal">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Languages</div>
+      <div class="value" id="statLangs">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Active jobs</div>
+      <div class="value" id="statJobs">—</div>
+    </div>
+  </div>
+  <div class="subtitle" style="margin-top:12px">
+    <strong>Available languages:</strong>
+    <span id="langPills"></span>
+  </div>
+</section>
+
+<!-- =============================================================== -->
+<!-- 2. SOURCE DB METADATA                                           -->
+<!-- =============================================================== -->
+<section class="card">
+  <h2>🗄️ Client database (source)</h2>
+  <div class="subtitle">
+    Schema introspection via <code>DatabaseMetaData</code>.
+    Catalog id: <code id="catalogIdLabel">—</code>,
+    source language: <code id="sourceLangLabel">—</code>.
+  </div>
+  <div id="metadataBox">Loading…</div>
+</section>
+
+<!-- =============================================================== -->
+<!-- 3. ELASTIC TM CONTENT BROWSER                                   -->
+<!-- =============================================================== -->
+<section class="card full-width">
+  <h2>📚 Elastic TM — translations browser</h2>
+  <div class="subtitle">
+    Stored translations per language. Pick a language to see the
+    catalog as it is exposed to client apps.
+  </div>
+  <div class="row">
+    <label>Target language:</label>
+    <select id="langSelect"
+            onchange="loadRecords()"
+            style="max-width:200px"></select>
+    <button class="primary" onclick="loadRecords()">Show records</button>
+  </div>
+  <div id="recordsBox" style="overflow:auto;max-height:380px"></div>
+</section>
+
+<!-- =============================================================== -->
+<!-- 4. SQL PROXY (mode 1)                                           -->
+<!-- =============================================================== -->
+<section class="card">
+  <h2>🔍 SQL proxy demo (Mode 1)</h2>
+  <div class="subtitle">
+    Same SELECT as your application, returned with translated text columns.
+    Filters/JOIN/ORDER BY apply to source data.
+  </div>
+  <textarea id="sqlInput" rows="3">SELECT ITEMNUM, DESCRIPTION, CATEGORY FROM ITEM WHERE CATEGORY = 'HYDRAULICS'</textarea>
+  <div class="row" style="margin-top:8px">
+    <label>Lang:</label>
+    <select id="sqlLang" style="max-width:120px"></select>
+    <button class="primary" onclick="runSql()">Execute</button>
+  </div>
+  <pre class="result" id="sqlResult">— no result yet —</pre>
+</section>
+
+<!-- =============================================================== -->
+<!-- 5. SIMPLE TEXT TRANSLATION (mode 2)                             -->
+<!-- =============================================================== -->
+<section class="card">
+  <h2>✏️ Simple translate (Mode 2)</h2>
+  <div class="subtitle">
+    Stateless one-off translation. Goes through the same NMT pipeline
+    + semantic cache.
+  </div>
+  <textarea id="textInput" rows="3"
+            placeholder="Enter text…">Hydraulic pump 500W, heavy-duty</textarea>
+  <div class="row" style="margin-top:8px">
+    <label>From:</label>
+    <input class="txt" id="srcLang" value="en" style="max-width:60px">
+    <label>To:</label>
+    <input class="txt" id="tgtLang" value="cs" style="max-width:60px">
+    <button class="primary" onclick="runTranslate()">Translate</button>
+  </div>
+  <pre class="result" id="textResult">— no result yet —</pre>
+</section>
+
+</main>
+
+<div class="footer">
+  Auto-Translate Sidecar v1.0 &nbsp;·&nbsp;
+  <a href="/swagger-ui.html">Swagger UI</a> &nbsp;·&nbsp;
+  <a href="/v3/api-docs">OpenAPI spec</a> &nbsp;·&nbsp;
+  Bachelor's thesis project, MENDELU 2026
+</div>
+
+<script>
+// =====================================================================
+//  Helpers
+// =====================================================================
+const CATALOG_ID = 'maximo-items';
+
+function authHeader() {
+  const u = document.getElementById('authUser').value;
+  const p = document.getElementById('authPass').value;
+  return 'Basic ' + btoa(u + ':' + p);
+}
+
+async function api(path, opts = {}) {
+  const headers = opts.headers || {};
+  headers['Authorization'] = authHeader();
+  if (opts.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const r = await fetch(path, { ...opts, headers });
+  const text = await r.text();
+  if (!r.ok) {
+    throw new Error('HTTP ' + r.status + ': ' + text);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// =====================================================================
+//  1. Service health + stats
+// =====================================================================
+async function loadHealth() {
+  const badge = document.getElementById('healthBadge');
+  badge.className = 'health loading';
+  badge.textContent = '⏳ checking…';
+  try {
+    const h = await fetch('/api/v1/health').then(r => r.json());
+    badge.className = 'health up';
+    badge.textContent = '✅ ' + h.status + ' · provider: ' + h.provider;
+    document.getElementById('statJobs').textContent = h.activeJobs ?? '—';
+  } catch (e) {
+    badge.className = 'health down';
+    badge.textContent = '❌ DOWN';
+  }
+}
+
+async function loadStats() {
+  try {
+    const s = await api('/api/v1/catalogs/' + CATALOG_ID + '/stats');
+    document.getElementById('statRecords').textContent = s.uniqueRecords;
+    document.getElementById('statTotal').textContent = s.totalTranslations;
+    document.getElementById('statLangs').textContent = s.languages.length;
+    const pills = (s.languages || []).map(l =>
+      '<span class="lang-pill">' + escapeHtml(l) + '</span>').join(' ');
+    document.getElementById('langPills').innerHTML =
+      pills || '<em style="color:#888">no translations yet — run sync first</em>';
+    populateLangSelectors(s.languages);
+  } catch (e) {
+    document.getElementById('langPills').innerHTML =
+      '<span class="err">' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+function populateLangSelectors(langs) {
+  ['langSelect', 'sqlLang'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '';
+    (langs || []).forEach(l => {
+      const o = document.createElement('option');
+      o.value = l; o.textContent = l;
+      sel.appendChild(o);
+    });
+  });
+}
+
+// =====================================================================
+//  2. Source DB metadata
+// =====================================================================
+async function loadMetadata() {
+  const box = document.getElementById('metadataBox');
+  box.innerHTML = 'Loading…';
+  try {
+    const md = await api('/api/v1/catalogs/' + CATALOG_ID + '/metadata');
+    document.getElementById('catalogIdLabel').textContent = md.catalogId;
+    document.getElementById('sourceLangLabel').textContent = md.sourceLang;
+
+    // configured tables (first), then discovered
+    let html = '<table>';
+    html += '<thead><tr>'
+          + '<th>Table</th><th>Columns</th>'
+          + '<th>Translated columns</th></tr></thead><tbody>';
+
+    const cfg = md.configuredTables || [];
+    const cfgByName = {};
+    cfg.forEach(t => cfgByName[t.name] = t);
+
+    Object.entries(md.discoveredTables || {}).forEach(([name, cols]) => {
+      const tcfg = cfgByName[name];
+      const trans = tcfg ? tcfg.textColumns : [];
+      const transSet = new Set(trans);
+      const colHtml = cols.map(c => {
+        const isTr = transSet.has(c);
+        const isId = tcfg && tcfg.idColumn === c;
+        let s = '<span class="mono">' + escapeHtml(c) + '</span>';
+        if (isId) s += ' <small style="color:#1565c0">[id]</small>';
+        if (isTr) s += ' <small style="color:#117a30">[translated]</small>';
+        return s;
+      }).join(', ');
+      html += '<tr>'
+           + '<td class="mono"><strong>' + escapeHtml(name) + '</strong></td>'
+           + '<td>' + colHtml + '</td>'
+           + '<td>' + (trans.length
+                 ? trans.map(t => '<span class="lang-pill" style="background:#e8f5e9;color:#117a30">'
+                     + escapeHtml(t) + '</span>').join(' ')
+                 : '<em style="color:#aaa">none configured</em>')
+           + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// =====================================================================
+//  3. Records browser
+// =====================================================================
+async function loadRecords() {
+  const lang = document.getElementById('langSelect').value;
+  if (!lang) return;
+  const box = document.getElementById('recordsBox');
+  box.innerHTML = 'Loading…';
+  try {
+    const data = await api(
+        '/api/v1/catalogs/' + CATALOG_ID + '/records?lang='
+        + encodeURIComponent(lang));
+    const recs = data.records || {};
+    const ids = Object.keys(recs);
+    if (ids.length === 0) {
+      box.innerHTML = '<em style="color:#888">No records in language '
+                      + escapeHtml(lang) + '. Run /sync first.</em>';
+      return;
+    }
+    // Najdeme všechny pole napříč
+    const fieldSet = new Set();
+    ids.forEach(id => Object.keys(recs[id]).forEach(f => fieldSet.add(f)));
+    const fields = Array.from(fieldSet);
+
+    let html = '<table><thead><tr><th>recordId</th>';
+    fields.forEach(f => html += '<th>' + escapeHtml(f) + '</th>');
+    html += '</tr></thead><tbody>';
+    ids.forEach(id => {
+      html += '<tr><td class="mono"><strong>'
+            + escapeHtml(id) + '</strong></td>';
+      fields.forEach(f => {
+        html += '<td>' + escapeHtml(recs[id][f] || '') + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div style="margin-top:8px;font-size:12px;color:#666">'
+         + 'Showing ' + ids.length + ' record(s) in '
+         + '<strong>' + escapeHtml(lang) + '</strong>.</div>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// =====================================================================
+//  4. SQL proxy
+// =====================================================================
+async function runSql() {
+  const lang = document.getElementById('sqlLang').value;
+  const sql = document.getElementById('sqlInput').value;
+  const out = document.getElementById('sqlResult');
+  out.textContent = 'Loading…';
+  try {
+    const data = await api('/api/v1/sql?lang=' + encodeURIComponent(lang),
+        { method: 'POST',
+          body: JSON.stringify({ query: sql }) });
+    out.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    out.textContent = '⚠ ' + e.message;
+  }
+}
+
+// =====================================================================
+//  5. Simple text translation
+// =====================================================================
+async function runTranslate() {
+  const text = document.getElementById('textInput').value;
+  const src = document.getElementById('srcLang').value;
+  const tgt = document.getElementById('tgtLang').value;
+  const out = document.getElementById('textResult');
+  out.textContent = 'Loading…';
+  try {
+    const data = await api('/api/v1/translate/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        sourceText: text, sourceLang: src, targetLang: tgt
+      })
+    });
+    out.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    out.textContent = '⚠ ' + e.message;
+  }
+}
+
+// =====================================================================
+//  Init
+// =====================================================================
+async function reloadAll() {
+  await Promise.all([loadHealth(), loadStats(), loadMetadata()]);
+  await loadRecords();
+}
+reloadAll();
+</script>
+</body>
+</html>

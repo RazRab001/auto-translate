@@ -1,0 +1,42 @@
+# Test profile configuration. Activates the "test" Spring profile so
+# SecurityConfig.validateProductionSecurity() recognizes a dev/test context
+# and tolerates the default change-me passwords without failing startup.
+spring:
+  profiles:
+    active: test
+  main:
+    allow-bean-definition-overriding: true
+  # Test-only datasource (in-memory H2, jiný než main; izolace od ostatních testů)
+  datasource:
+    url: jdbc:h2:mem:catalogdb_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+
+# Test catalog config (kopie main yml, aby @ConfigurationProperties bind
+# fungovala v testovém kontextu — test/resources/application.yml má
+# přednost před main pokud existuje)
+app:
+  catalog:
+    id: maximo-items
+    source-lang: en
+    target-langs: [cs, de, sk, pl]
+    batch-size: 500
+    tables:
+      - name: ITEM
+        id-column: ITEMNUM
+        text-columns: [DESCRIPTION, LONGDESCRIPTION]
+  demo:
+    preload-on-startup: true
+  cache:
+    similarity-threshold: 0.82
+
+ai:
+  default-provider: mock        # testy běží na mock provideru
+  embedding:
+    provider: hash

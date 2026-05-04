@@ -1,0 +1,157 @@
+spring:
+  application:
+    name: auto-translate-sidecar
+  jackson:
+    default-property-inclusion: non_null
+
+  # ----- Datasource pro katalogový pipeline (CatalogTranslationService) -----
+  # Demo používá vestavěné H2 (in-memory). Pro produkční nasazení přepnout
+  # na PostgreSQL/Db2/Oracle URL a~přidat příslušný JDBC driver do pom.xml.
+  datasource:
+    url: ${CATALOG_DB_URL:jdbc:h2:mem:catalogdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL}
+    username: ${CATALOG_DB_USER:sa}
+    password: ${CATALOG_DB_PASSWORD:}
+    driver-class-name: ${CATALOG_DB_DRIVER:org.h2.Driver}
+  sql:
+    init:
+      # 'always' pro demo (re-vytvoří schema+data při startu); v produkci 'never'
+      mode: ${CATALOG_DB_INIT_MODE:always}
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+
+  # Mode 2: file upload limit pro POST /api/v1/translate/document.
+  # 10 MB stačí pro běžnou Maximo přílohu DOCLINKS (PDF s~tech. dokumentací).
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: 8080
+
+# Asynchronní zpracování
+app:
+  async:
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 100
+  jobs:
+    # JobRegistry TTL (Caffeine eviction). MUSÍ být >= app.idempotency.ttl-hours:
+    # pokud klient hledá REPLAY originalJobId, který idempotency-store stále drží,
+    # ale JobRegistry už ho evictoval, GET /jobs/{id} vrátí 404 nebo PROCESSING navždy.
+    ttl-minutes: 1500        # 25 h, mírně přes 24 h idempotency window
+    max-entries: 100000      # DoS protection: max active jobs in memory
+  idempotency:
+    ttl-hours: 24            # IETF idempotency-key-header draft window
+    max-entries: 1000000
+  # Bezpečnost — produkčně přesunout do Vault / K8s Secrets
+  security:
+    maximo-user:
+      username: ${MAXIMO_USERNAME:maximo}
+      password: ${MAXIMO_PASSWORD:maximo-pwd-change-me}
+    admin-user:
+      username: ${ADMIN_USERNAME:admin}
+      password: ${ADMIN_PASSWORD:admin-pwd-change-me}
+  cache:
+    similarity-threshold: 0.82  # střed empirického optima 0,80–0,85
+    repository: lucene          # 'lucene' (kNN přes Apache Lucene)
+                                # nebo 'in-memory' (jednoduchý ArrayList)
+    in-memory-capacity: 10000   # použito pouze pro repository: in-memory
+    lucene:
+      index-path: ./tm-index    # MMapDirectory pro perzistentní index
+      in-memory: false          # true = ByteBuffersDirectory (jen testy)
+
+  # ----- Konfigurace katalogového flow -----
+  # Sidecar přečte konfigurované tabulky ze~spring.datasource a~přeloží
+  # každý text-column do všech target-langs. Endpointy:
+  #   POST /api/v1/catalogs/{id}/sync     – spustí překlad
+  #   GET  /api/v1/catalogs/{id}/records  – vrátí katalog v zvoleném jazyce
+  catalog:
+    id: maximo-items
+    source-lang: en
+    target-langs: [cs, de, sk, pl]
+    batch-size: 500
+    tables:
+      - name: ITEM
+        id-column: ITEMNUM
+        text-columns: [DESCRIPTION, LONGDESCRIPTION]
+
+  # Demo data: na startu (kromě production profilu) automaticky spustí
+  # sync katalogu, aby Swagger UI měl hotová data k dispozici
+  # (viz CatalogDemoPreloader).
+  demo:
+    preload-on-startup: ${DEMO_PRELOAD:true}
+
+# AI providers — přepínání bez změny kódu
+ai:
+  default-provider: mock        # přepnout na deepl/openai/google
+  embedding:
+    # provider: 'openai' (REAL semantic embeddings, vyžaduje OPENAI_API_KEY)
+    #         | 'mpnet'  (lokální paraphrase-multilingual-mpnet-base-v2,
+    #                    ONNX Runtime, viz MpnetEmbedder.java)
+    #         | 'hash'   (POUZE pro offline testy — NENÍ sémantický)
+    provider: hash
+    # Lokální mpnet model je identifikován cestami k~ONNX/tokenizer souborům
+    # (viz mpnet.model-path / mpnet.tokenizer-path níže), nikoli touto config
+    # větví~--- proto zde žádné `model:` pole není.
+    # Produkční doporučení: provider=openai (text-embedding-3-small);
+    # alternativa: lokální mpnet má vyšší recall na průmyslových duplicitách,
+    # avšak vyžaduje ONNX Runtime integraci (rozšíření).
+  deepl:
+    api-key: ${DEEPL_API_KEY:}
+    base-url: https://api-free.deepl.com/v2
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    base-url: https://api.openai.com/v1
+    chat-model: gpt-4o-mini
+    embedding-model: text-embedding-3-small
+  google:
+    api-key: ${GOOGLE_API_KEY:}
+    base-url: https://translation.googleapis.com/language/translate/v2
+  retry:
+    max-attempts: 3
+    initial-delay-ms: 1000
+    multiplier: 2.0
+    max-delay-ms: 8000
+
+# Resilience4j Circuit Breaker — kaskádu selhání zabraňuje při degradaci NMT API
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        failure-rate-threshold: 50           # CB se otevírá při ≥50% failures
+        slow-call-rate-threshold: 100        # u 100% pomalých volání také
+        slow-call-duration-threshold: 10s    # > 10s = pomalé volání
+        sliding-window-size: 20              # 20 posledních volání
+        minimum-number-of-calls: 10          # CB neaktivní pod 10 voláními
+        wait-duration-in-open-state: 30s     # po 30s zkusí half-open
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+    instances:
+      deepl:  { base-config: default }
+      openai: { base-config: default }
+      google: { base-config: default }
+
+# Logování — strukturované JSON
+logging:
+  level:
+    root: INFO
+    cz.mendelu.auto: DEBUG
+    org.springframework.web: INFO
+
+# Springdoc OpenAPI / Swagger UI
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    # Lepší UX: API operations seřazené alfabeticky, tagy také.
+    # `try-it-out-enabled: true` zapne implicitně tlačítko "Try it out"
+    # pro každý endpoint (klient může volat přímo z prohlížeče).
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    display-request-duration: true
+    # `disable-swagger-default-url: true` skryje výchozí "petstore" url
+    # ve výběru group/spec.
+    disable-swagger-default-url: true
+  api-docs:
+    path: /v3/api-docs

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Strukturované JSON logy -->
+    <appender name="JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/translation-audit.log</file>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>jobId</includeMdcKeyName>
+            <includeMdcKeyName>provider</includeMdcKeyName>
+            <includeMdcKeyName>cacheHit</includeMdcKeyName>
+            <includeMdcKeyName>latencyMs</includeMdcKeyName>
+            <includeMdcKeyName>sourceLang</includeMdcKeyName>
+            <includeMdcKeyName>targetLang</includeMdcKeyName>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/audit.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Konzolový output (čitelný formát pro vývoj) -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%X{jobId:-}] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="JSON"/>
+    </root>
+
+    <logger name="cz.mendelu.auto" level="DEBUG"/>
+</configuration>

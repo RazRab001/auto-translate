@@ -1,0 +1,81 @@
+# ===== Tajemství / klíče =====
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+*.crt
+*.cer
+id_rsa*
+*credentials*
+*secret*
+
+# Spring Boot lokální / produkční override (vždy obsahují tajemství)
+src/main/resources/application-local.yml
+src/main/resources/application-local.properties
+src/main/resources/application-prod.yml
+src/main/resources/application-prod.properties
+src/main/resources/application-secret.yml
+src/main/resources/application-secret.properties
+src/test/resources/application-local.yml
+application-local.yml
+application-prod.yml
+application-secret.yml
+
+# ===== Maven / Java build =====
+target/
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+replay_pid*
+
+# Maven wrapper – jar je výjimka (commitujeme ho)
+!.mvn/wrapper/maven-wrapper.jar
+
+# ===== Spring Boot runtime artefakty =====
+logs/
+*.log
+*.log.*
+
+# Lucene Translation Memory index (perzistentní)
+tm-index/
+
+# H2 file-mode databáze
+*.db
+*.mv.db
+*.trace.db
+*.lock.db
+
+# ONNX modely (pokud uživatel stáhne mpnet lokálně)
+*.onnx
+models/
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+.factorypath
+nbproject/
+nb-configuration.xml
+.springBeans
+.metadata/
+
+# ===== OS junk =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
